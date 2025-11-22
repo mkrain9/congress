@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  congress:
+    build: .
+    environment:
+      - BUCKET_NAME=watch-dogs-congress
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - ${USERPROFILE}\.aws:/root/.aws:ro

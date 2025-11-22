@@ -22,6 +22,11 @@ import smtplib
 import email.utils
 from email.mime.text import MIMEText
 import getpass
+import boto3
+from io import BytesIO
+
+s3 = boto3.client('s3')
+BUCKET_NAME = os.environ.get('CONGRESS_DATA_BUCKET', 'watch-dogs-congress')
 
 
 # read in an opt-in config file for changing directories and supplying email settings
@@ -40,7 +45,6 @@ eastern_time_zone = timezone('US/Eastern')
 # scraper should be instantiated at class-load time, so that it can rate limit appropriately
 scraper = scrapelib.Scraper(requests_per_minute=120, retry_attempts=3)
 scraper.user_agent = "unitedstates/congress (https://github.com/unitedstates/congress)"
-
 
 def format_datetime(obj):
     if isinstance(obj, datetime.datetime):
@@ -174,6 +178,7 @@ def process_set(to_fetch, fetch_func, options, *extra_args):
             results = fetch_func(id, options, *extra_args)
         except Exception as e:
             if options.get('raise', False):
+                logging.error(f"Error: {e}")
                 raise
             else:
                 errors.append((id, e, format_exception(e)))
@@ -343,13 +348,19 @@ def download(url, destination=None, options={}):
 
     return body
 
+def s3_key_from_path(destination: str) -> str:
+    """
+    Convert a local file path (e.g. data/congress/...) into an S3 key.
+    You can customize this mapping to match your desired folder structure.
+    """
+    # Strip leading "./" if present
+    if destination.startswith("./"):
+        destination = destination[2:]
+    return destination.replace("\\", "/")  # normalize Windows paths if any
 
 def write(content, destination, options={}):
     if options.get("diff"):
         # Instead of writing the file, do a comparison with what's on disk
-        # to test any changes. But be nice and replace any update date with
-        # what's in the previous file so we avoid spurrious changes in the
-        # diff. Use how updated_at appears in the JSON and in the XML.
         if os.path.exists(destination):
             with open(destination) as f:
                 source = f.read()
@@ -360,23 +371,33 @@ def write(content, destination, options={}):
                 if m1 and m2:
                     revised = revised.replace(m2.group(0), m1.group(0))
 
-            # Avoid writing to disk and spawning `diff` by checking if
-            # the files match in memory.
             if revised == source:
                 return
 
             if not show_diff_ask_ok(source, revised, destination):
-                # User cancelled save.
                 return
 
-    # Save the content to disk.
-    mkdir_p(os.path.dirname(destination))
-    f = open(destination, 'wb')
-    try:
-        f.write(content.encode('utf-8'))
-    except:
-        f.write(content)
-    f.close()
+    # 🟡 Instead of saving to disk, write to S3
+    key = s3_key_from_path(destination)
+
+    # Try encoding as utf-8
+    if isinstance(content, str):
+        data_bytes = content.encode('utf-8')
+    else:
+        data_bytes = content
+
+    s3.put_object(
+        Bucket=BUCKET_NAME,
+        Key=key,
+        Body=data_bytes,
+        ContentType='application/json' if key.endswith('.json') else 'text/plain'
+    )
+
+    # Optional: if you still want a local cache, uncomment this:
+    # mkdir_p(os.path.dirname(destination))
+    # with open(destination, 'wb') as f:
+    #     f.write(data_bytes)
+
 
 
 def show_diff_ask_ok(source, revised, fn):

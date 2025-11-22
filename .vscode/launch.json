@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Congress Scraper (Votes 119)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "congress.run",
+      "args": ["votes", "--congress=119"],
+      "env": {
+        "BUCKET_NAME": "watch-dogs-congress"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}
